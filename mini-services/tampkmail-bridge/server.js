@@ -86,10 +86,9 @@ app.get("/", (req, res) => {
   res.json({
     name: "Tampkmail Bridge v5",
     version: "5.0.0",
-    backends: ["mail.tm", "nullsto"],
+    backends: ["mail.tm"],
     domains: [...MAILTM_DOMAINS, ...EDU_DOMAINS],
     accounts: ACCOUNTS.size,
-    nullsto_available: existsSync(NULLSTO_BRIDGE),
     endpoints: ["GET /", "GET /health", "POST /create-email", "POST /check-inbox"],
   });
 });
@@ -101,37 +100,11 @@ app.get("/health", (req, res) => {
 app.post("/create-email", async (req, res) => {
   const { domain } = req.body || {};
   const isEdu = domain && EDU_DOMAINS.includes(domain);
-  const isMailTM = !domain || !EDU_DOMAINS.includes(domain);
-  const actualDomain = isMailTM
-    ? (MAILTM_DOMAINS.includes(domain) ? domain : MAILTM_DOMAINS[0])
-    : domain;
+  const actualDomain = domain && MAILTM_DOMAINS.includes(domain)
+    ? domain
+    : (isEdu ? "nullsto.edu.pl" : MAILTM_DOMAINS[0]);
 
-  if (isEdu) {
-    if (!existsSync(NULLSTO_BRIDGE)) {
-      return res.status(500).json({ success: false, error: "Nullsto backend not available" });
-    }
-    try {
-      const result = await nullstoRequest({ action: "create" });
-      if (result.success) {
-        const { address, id, secret } = result;
-        ACCOUNTS.set(address, { id, secret, backend: "nullsto" });
-        return res.json({
-          success: true,
-          address,
-          domain: actualDomain,
-          backend: "nullsto",
-          id,
-          secret,
-          message: "Email created on Nullsto. Use secret to check inbox.",
-        });
-      }
-      return res.status(500).json({ success: false, error: result.error || "Nullsto create failed" });
-    } catch (e) {
-      return res.status(500).json({ success: false, error: e.message });
-    }
-  }
-
-  // mail.tm path
+  // mail.tm path (used for all domains including edu)
   const address = `${randStr(12)}@${actualDomain}`;
   const password = randStr(20);
   const ac = await fetchMailTM("/accounts", {
@@ -159,38 +132,10 @@ app.post("/create-email", async (req, res) => {
 });
 
 app.post("/check-inbox", async (req, res) => {
-  const { address, secret, id } = req.body || {};
+  const { address } = req.body || {};
   if (!address) return res.status(400).json({ success: false, error: "address required" });
 
   const acct = ACCOUNTS.get(address);
-
-  if (acct && acct.backend === "nullsto") {
-    if (!existsSync(NULLSTO_BRIDGE)) {
-      return res.status(500).json({ success: false, error: "Nullsto backend not available" });
-    }
-    try {
-      const sid = id || acct.id;
-      const tok = secret || acct.secret;
-      if (!sid || !tok) {
-        return res.status(400).json({ success: false, error: "id and secret required for nullsto inbox check" });
-      }
-      const result = await nullstoRequest({ action: "inbox", id: sid, secret: tok });
-      if (result.success) {
-        return res.json({
-          success: true,
-          address,
-          messages: result.messages || [],
-          count: result.count || 0,
-          raw: result,
-        });
-      }
-      return res.status(500).json({ success: false, error: result.error || "Nullsto inbox check failed" });
-    } catch (e) {
-      return res.status(500).json({ success: false, error: e.message });
-    }
-  }
-
-  // Legacy/mail.tm path
   const acc = acct || { token: null };
   if (!acc.token) {
     return res.json({ success: true, address, messages: [], count: 0 });
