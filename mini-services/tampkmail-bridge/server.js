@@ -211,21 +211,21 @@ app.post("/check-inbox", async (req, res) => {
       const messages = [];
 
       if (inboxData && inboxData.payload) {
-        // Decode payload via sonjj API
+        // Fetch decoded messages from sonjj inbox API
         const type = domain && domain.includes("gmail") ? "temp_gmail"
           : domain && domain.includes("outlook") ? "temp_outlook"
           : "temp_email";
         
-        const payloadResp = await page.evaluate(async ({ p, t }) => {
+        const sonjjResp = await page.evaluate(async ({ p, t }) => {
           const r = await fetch(
-            `https://api.sonjj.com/v1/${t}/message?payload=${encodeURIComponent(p)}`
+            `https://api.sonjj.com/v1/${t}/inbox?payload=${encodeURIComponent(p)}`
           );
           if (!r.ok) return { error: (await r.text()).substring(0, 200) };
           return await r.json();
         }, { p: inboxData.payload, t: type });
 
-        if (payloadResp.messages) {
-          for (const msg of payloadResp.messages) {
+        if (sonjjResp.messages) {
+          for (const msg of sonjjResp.messages) {
             messages.push({
               mid: msg.mid,
               from: msg.from,
