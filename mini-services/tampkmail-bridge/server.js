@@ -8,6 +8,7 @@ const IS_HEADLESS = !process.env.DISPLAY && !process.env.XVFB_RUNNING;
 
 let browser = null;
 let context = null;
+let browserError = null;
 
 async function getContext() {
   if (context && !context.pages().every((p) => p.isClosed())) return context;
@@ -23,19 +24,39 @@ async function getContext() {
 
 async function getBrowser() {
   if (browser && browser.isConnected()) return browser;
-  browser = await chromium.launch({
-    headless: IS_HEADLESS,
-    args: [
-      "--no-sandbox",
-      "--disable-setuid-sandbox",
-      "--disable-dev-shm-usage",
-      ...(IS_HEADLESS ? ["--disable-gpu"] : []),
-    ],
-  });
+  try {
+    browser = await chromium.launch({
+      headless: IS_HEADLESS,
+      args: [
+        "--no-sandbox",
+        "--disable-setuid-sandbox",
+        "--disable-dev-shm-usage",
+        ...(IS_HEADLESS ? ["--disable-gpu"] : []),
+      ],
+    });
+    browserError = null;
+    console.log("Browser launched (headless:", IS_HEADLESS, ")");
+  } catch (err) {
+    browserError = err.message;
+    console.error("Browser launch failed:", err.message);
+    throw err;
+  }
   return browser;
 }
 
 const DOMAINS = ["melbourne.edu.pl", "sydney.edu.pl", "tokyo.edu.pl"];
+
+app.get("/", (req, res) => {
+  res.json({
+    name: "Tampkmail Bridge",
+    version: "1.0.0",
+    status: browser ? (browser.isConnected() ? "ready" : "disconnected") : "starting",
+    browserError,
+    headless: IS_HEADLESS,
+    display: process.env.DISPLAY || "none",
+    endpoints: ["GET /health", "GET /", "POST /create-email", "POST /get-message"],
+  });
+});
 
 app.post("/create-email", async (req, res) => {
   const { domain } = req.body;
@@ -143,6 +164,8 @@ app.get("/health", (req, res) => {
   res.json({
     status: "ok",
     browser: browser ? (browser.isConnected() ? "connected" : "disconnected") : "not_started",
+    browserError,
+    headless: IS_HEADLESS,
   });
 });
 
