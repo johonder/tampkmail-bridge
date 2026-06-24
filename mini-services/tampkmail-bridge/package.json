@@ -1,17 +1,12 @@
 {
   "name": "tampkmail-bridge",
-  "version": "1.0.0",
+  "version": "4.0.0",
   "type": "module",
   "scripts": {
     "start": "node server.js",
     "dev": "node server.js"
   },
   "dependencies": {
-    "express": "^4.21.0",
-    "playwright": "1.61.1",
-    "playwright-extra": "^4.3.6",
-    "puppeteer-core": "^25.2.0",
-    "puppeteer-extra": "^3.3.6",
-    "puppeteer-extra-plugin-stealth": "^2.11.2"
+    "express": "^4.21.0"
   }
 }
