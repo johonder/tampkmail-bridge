@@ -98,7 +98,8 @@ app.post("/create-email", async (req, res) => {
     });
   }
 
-  // Smailpro edu domain - local generation only
+  // Smailpro edu domain - store without token for inbox lookup
+  ACCOUNTS.set(address, { password, token: null });
   return res.json({
     success: true,
     address,
