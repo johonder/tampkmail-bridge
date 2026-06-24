@@ -1,7 +1,13 @@
 import express from "express";
+import { readFileSync } from "fs";
+import { join, dirname } from "path";
+import { fileURLToPath } from "url";
 
 const app = express();
 app.use(express.json({ limit: "10mb" }));
+
+const __dirname = dirname(fileURLToPath(import.meta.url));
+const INDEX_HTML = readFileSync(join(__dirname, "index.html"), "utf-8");
 
 const MAILTM = "https://api.mail.tm";
 const ACCOUNTS = new Map();
@@ -39,6 +45,10 @@ function randStr(n) {
 }
 
 app.get("/", (req, res) => {
+  const accept = req.headers.accept || "";
+  if (accept.includes("text/html")) {
+    return res.type("html").send(INDEX_HTML);
+  }
   res.json({
     name: "Tampkmail Bridge v4",
     version: "4.0.0",

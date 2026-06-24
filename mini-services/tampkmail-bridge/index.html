@@ -1,0 +1,188 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Tampkmail Bridge Test</title>
+<style>
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; background: #0f172a; color: #e2e8f0; min-height: 100vh; display: flex; justify-content: center; padding: 2rem; }
+  .container { max-width: 640px; width: 100%; }
+  h1 { font-size: 1.5rem; font-weight: 600; margin-bottom: .25rem; color: #f8fafc; }
+  .subtitle { color: #94a3b8; font-size: .875rem; margin-bottom: 2rem; }
+  .card { background: #1e293b; border: 1px solid #334155; border-radius: 12px; padding: 1.5rem; margin-bottom: 1rem; }
+  h2 { font-size: 1.125rem; font-weight: 500; margin-bottom: 1rem; color: #f1f5f9; }
+  .form-group { margin-bottom: 1rem; }
+  label { display: block; font-size: .875rem; font-weight: 500; color: #cbd5e1; margin-bottom: .375rem; }
+  select, input { width: 100%; padding: .625rem .75rem; border: 1px solid #475569; border-radius: 8px; background: #0f172a; color: #e2e8f0; font-size: .875rem; }
+  select:focus, input:focus { outline: none; border-color: #6366f1; box-shadow: 0 0 0 3px rgba(99,102,241,.3); }
+  button { width: 100%; padding: .75rem; border: none; border-radius: 8px; font-weight: 600; font-size: .875rem; cursor: pointer; transition: background .15s; }
+  button:disabled { opacity: .5; cursor: not-allowed; }
+  .btn-primary { background: #6366f1; color: #fff; }
+  .btn-primary:hover:not(:disabled) { background: #4f46e5; }
+  .btn-success { background: #22c55e; color: #fff; }
+  .btn-success:hover:not(:disabled) { background: #16a34a; }
+  .output { margin-top: 1rem; background: #0f172a; border: 1px solid #334155; border-radius: 8px; padding: 1rem; font-family: 'JetBrains Mono', 'Fira Code', monospace; font-size: .8125rem; white-space: pre-wrap; word-break: break-all; max-height: 400px; overflow-y: auto; }
+  .output .key { color: #818cf8; }
+  .output .string { color: #34d399; }
+  .output .null { color: #94a3b8; }
+  .output .number { color: #fbbf24; }
+  .badge { display: inline-block; padding: .125rem .5rem; border-radius: 99px; font-size: .75rem; font-weight: 500; margin-left: .5rem; }
+  .badge-green { background: #065f46; color: #6ee7b7; }
+  .badge-red { background: #7f1d1d; color: #fca5a5; }
+  .badge-yellow { background: #713f12; color: #fcd34d; }
+  .status-bar { display: flex; gap: .75rem; align-items: center; padding: .75rem 1rem; border-radius: 8px; margin-bottom: 1.5rem; font-size: .875rem; }
+  .status-bar.ok { background: #064e3b; border: 1px solid #065f46; color: #6ee7b7; }
+  .status-bar.error { background: #450a0a; border: 1px solid #7f1d1d; color: #fca5a5; }
+  .info-grid { display: grid; grid-template-columns: auto 1fr; gap: .5rem .75rem; font-size: .875rem; }
+  .info-grid .label { color: #94a3b8; }
+  .info-grid .value { color: #e2e8f0; }
+  .copy-btn { background: #334155; color: #cbd5e1; border: none; border-radius: 6px; padding: .25rem .5rem; font-size: .75rem; cursor: pointer; float: right; }
+  .copy-btn:hover { background: #475569; }
+  hr { border: none; border-top: 1px solid #334155; margin: 1rem 0; }
+</style>
+</head>
+<body>
+<div class="container">
+  <h1>Tampkmail Bridge</h1>
+  <p class="subtitle">Test the temp email API endpoints directly from your browser</p>
+
+  <div id="statusBar" class="status-bar">Loading...</div>
+
+  <div class="card">
+    <h2>1. Create Email</h2>
+    <div class="form-group">
+      <label for="domainSelect">Domain</label>
+      <select id="domainSelect">
+        <option value="web-library.net">web-library.net (mail.tm)</option>
+        <option value="melbourne.edu.pl">melbourne.edu.pl (smailpro)</option>
+        <option value="sydney.edu.pl">sydney.edu.pl (smailpro)</option>
+        <option value="tokyo.edu.pl">tokyo.edu.pl (smailpro)</option>
+      </select>
+    </div>
+    <button id="createBtn" class="btn-primary" onclick="createEmail()">Create Email Address</button>
+    <div id="createOutput" class="output" style="display:none"></div>
+  </div>
+
+  <div class="card">
+    <h2>2. Check Inbox</h2>
+    <div class="form-group">
+      <label for="addressInput">Email Address</label>
+      <input type="text" id="addressInput" placeholder="Paste the created address here">
+    </div>
+    <button id="checkBtn" class="btn-success" onclick="checkInbox()">Check Inbox</button>
+    <div id="checkOutput" class="output" style="display:none"></div>
+  </div>
+
+  <div class="card">
+    <h2>Server Info</h2>
+    <div class="info-grid" id="serverInfo">
+      <span class="label">Name:</span><span class="value" id="infoName">-</span>
+      <span class="label">Version:</span><span class="value" id="infoVersion">-</span>
+      <span class="label">Backend:</span><span class="value" id="infoBackend">-</span>
+      <span class="label">Domains:</span><span class="value" id="infoDomains">-</span>
+      <span class="label">Accounts:</span><span class="value" id="infoAccounts">-</span>
+    </div>
+  </div>
+</div>
+
+<script>
+const BASE = '';
+let lastAddress = '';
+
+async function api(path, body) {
+  const r = await fetch(BASE + path, {
+    method: body ? 'POST' : 'GET',
+    headers: body ? {'Content-Type': 'application/json'} : {},
+    body: body ? JSON.stringify(body) : undefined,
+  });
+  return r.json();
+}
+
+function showOutput(el, data, ok) {
+  el.style.display = 'block';
+  el.innerHTML = '';
+  const pre = document.createElement('pre');
+  pre.textContent = JSON.stringify(data, null, 2);
+  el.appendChild(pre);
+  el.style.borderColor = ok ? '#065f46' : '#7f1d1f';
+}
+
+function setStatus(ok, msg) {
+  const bar = document.getElementById('statusBar');
+  bar.className = 'status-bar ' + (ok ? 'ok' : 'error');
+  bar.innerHTML = ok ? '✓ ' + msg : '✗ ' + msg;
+}
+
+async function createEmail() {
+  const btn = document.getElementById('createBtn');
+  const out = document.getElementById('createOutput');
+  btn.disabled = true;
+  btn.textContent = 'Creating...';
+  out.style.display = 'none';
+
+  try {
+    const domain = document.getElementById('domainSelect').value;
+    const data = await api('/create-email', { domain });
+    showOutput(out, data, data.success);
+    if (data.success) {
+      lastAddress = data.address;
+      document.getElementById('addressInput').value = data.address;
+      document.getElementById('checkBtn').textContent = 'Check Inbox';
+      setStatus(true, 'Email created: ' + data.address);
+    } else {
+      setStatus(false, data.error || 'Creation failed');
+    }
+  } catch (e) {
+    showOutput(out, { error: e.message }, false);
+    setStatus(false, e.message);
+  } finally {
+    btn.disabled = false;
+    btn.textContent = 'Create Email Address';
+  }
+}
+
+async function checkInbox() {
+  const btn = document.getElementById('checkBtn');
+  const out = document.getElementById('checkOutput');
+  const addr = document.getElementById('addressInput').value.trim();
+  if (!addr) { setStatus(false, 'Enter an email address first'); return; }
+  btn.disabled = true;
+  btn.textContent = 'Checking...';
+  out.style.display = 'none';
+
+  try {
+    const domain = addr.split('@')[1] || '';
+    const data = await api('/check-inbox', { address: addr, domain });
+    showOutput(out, data, data.success);
+    if (data.success) {
+      setStatus(true, 'Inbox has ' + data.count + ' message(s)');
+    } else {
+      setStatus(false, data.error || 'Check failed');
+    }
+  } catch (e) {
+    showOutput(out, { error: e.message }, false);
+    setStatus(false, e.message);
+  } finally {
+    btn.disabled = false;
+    btn.textContent = 'Check Inbox';
+  }
+}
+
+async function loadInfo() {
+  try {
+    const data = await api('/');
+    document.getElementById('infoName').textContent = data.name;
+    document.getElementById('infoVersion').textContent = data.version;
+    document.getElementById('infoBackend').textContent = data.backend;
+    document.getElementById('infoDomains').textContent = (data.domains || []).join(', ');
+    document.getElementById('infoAccounts').textContent = data.accounts;
+    setStatus(true, 'Server is running');
+  } catch (e) {
+    setStatus(false, 'Cannot reach server: ' + e.message);
+  }
+}
+loadInfo();
+</script>
+</body>
+</html>
