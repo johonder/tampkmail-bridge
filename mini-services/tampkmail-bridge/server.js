@@ -12,7 +12,7 @@ const INDEX_HTML = readFileSync(join(__dirname, "index.html"), "utf-8");
 
 const MAILTM = "https://api.mail.tm";
 const ACCOUNTS = new Map();
-const EDU_DOMAINS = ["nullsto.edu.pl"];
+const EDU_DOMAINS = ["nullsto.edu.pl", "melbourne.edu.pl", "sydney.edu.pl", "tokyo.edu.pl"];
 const NULLSTO_BRIDGE = join(__dirname, "nullsto_bridge.py");
 
 let MAILTM_DOMAINS = [];

@@ -4,7 +4,7 @@ compatibility_date = "2024-12-01"
 compatibility_flags = ["nodejs_compat"]
 
 [env.production]
-vars = { NODE_VERSION = "22", BRIDGE_URL = "http://localhost:3000" }
+vars = { NODE_VERSION = "22", BRIDGE_URL = "https://tampkmail-bridge-1.onrender.com" }
 
 [env.preview]
-vars = { NODE_VERSION = "22", BRIDGE_URL = "http://localhost:3000" }
+vars = { NODE_VERSION = "22", BRIDGE_URL = "https://tampkmail-bridge-1.onrender.com" }

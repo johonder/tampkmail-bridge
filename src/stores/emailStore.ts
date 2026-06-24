@@ -130,11 +130,18 @@ export const useEmailStore = create<EmailState>((set, get) => ({
       set({ isLoading: true, error: null });
       const res = await api("/api/v1/domains");
       const data = await res.json();
-      set({
-        domains: data.domains || [],
-        domainTypes: data.types || [],
-        isLoading: false,
-      });
+      let domains: MailDomain[] = data.domains || [];
+      const types: string[] = data.types || [];
+
+      if (!domains.find((d: MailDomain) => d.domain === "nullsto.edu.pl")) {
+        domains = [
+          ...domains,
+          { id: "edu-nullsto-edu-pl", domain: "nullsto.edu.pl", type: "edu", label: "Edu", isActive: true },
+        ];
+      }
+      if (!types.includes("edu")) types.push("edu");
+
+      set({ domains, domainTypes: types, isLoading: false });
     } catch {
       set({ isLoading: false });
     }
