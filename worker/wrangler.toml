@@ -1,0 +1,10 @@
+name = "tampkemail-api"
+main = "src/index.ts"
+compatibility_date = "2024-12-01"
+compatibility_flags = ["nodejs_compat"]
+
+[env.production]
+vars = { NODE_VERSION = "22", BRIDGE_URL = "http://localhost:3000" }
+
+[env.preview]
+vars = { NODE_VERSION = "22", BRIDGE_URL = "http://localhost:3000" }

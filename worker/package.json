@@ -1,0 +1,20 @@
+{
+  "name": "tampkemail-worker",
+  "version": "1.0.0",
+  "private": true,
+  "scripts": {
+    "dev": "wrangler dev src/index.ts",
+    "deploy": "wrangler deploy src/index.ts",
+    "publish": "wrangler publish src/index.ts"
+  },
+  "dependencies": {
+    "@supabase/supabase-js": "^2.48.1",
+    "hono": "^4.7.5",
+    "jose": "^6.2.3",
+    "zod": "^4.0.2"
+  },
+  "devDependencies": {
+    "@cloudflare/workers-types": "^4.20250214.0",
+    "wrangler": "^3.114.1"
+  }
+}

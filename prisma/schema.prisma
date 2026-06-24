@@ -1,0 +1,139 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+  directUrl = env("DIRECT_URL")
+}
+
+model User {
+  id        String   @id @default(cuid())
+  email     String   @unique
+  passwordHash String
+  name      String?
+  role      String   @default("user")
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+}
+
+model ApiKey {
+  id          String   @id @default(cuid())
+  key         String   @unique
+  label       String
+  email       String?
+  domain      String?
+  active      Boolean  @default(true)
+  rateLimit   Int      @default(60)
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+  lastUsedAt  DateTime?
+  usageCount  Int      @default(0)
+
+  usages  UsageRecord[]
+  domains DomainAccess[]
+}
+
+model DomainAccess {
+  id        String   @id @default(cuid())
+  apiKeyId  String
+  domain    String
+  createdAt DateTime @default(now())
+
+  apiKey ApiKey @relation(fields: [apiKeyId], references: [id], onDelete: Cascade)
+}
+
+model UsageRecord {
+  id        String   @id @default(cuid())
+  apiKeyId  String
+  action    String
+  email     String?
+  ip        String?
+  createdAt DateTime @default(now())
+
+  apiKey ApiKey @relation(fields: [apiKeyId], references: [id], onDelete: Cascade)
+}
+
+model EmailSession {
+  id           String   @id @default(cuid())
+  address      String   @unique
+  domain       String
+  domainType   String
+  apiKey       String?
+  payload      String?
+  server       String?
+  isActive     Boolean  @default(true)
+  keepaliveAt  DateTime?
+  createdAt    DateTime @default(now())
+  expiredAt    DateTime?
+
+  messages EmailMessage[]
+}
+
+model EmailMessage {
+  id              String   @id @default(cuid())
+  sessionId       String
+  mid             String
+  fromAddress     String
+  fromName        String?
+  subject         String
+  intro           String?
+  body            String?
+  bodyHtml        String?
+  seen            Boolean  @default(false)
+  starred         Boolean  @default(false)
+  hasAttachments  Boolean  @default(false)
+  createdAt       DateTime @default(now())
+  receivedAt      DateTime @default(now())
+
+  session     EmailSession      @relation(fields: [sessionId], references: [id], onDelete: Cascade)
+  attachments EmailAttachment[]
+}
+
+model EmailAttachment {
+  id           String @id @default(cuid())
+  messageId    String
+  filename     String
+  mimeType     String
+  size         Int
+  data         Bytes?
+  storageUrl   String?
+  createdAt    DateTime @default(now())
+
+  message EmailMessage @relation(fields: [messageId], references: [id], onDelete: Cascade)
+}
+
+model PoolAccount {
+  id            String   @id @default(cuid())
+  email         String   @unique
+  type          String
+  credentials   String
+  server        String?
+  active        Boolean  @default(true)
+  inUse         Boolean  @default(false)
+  lastUsedAt    DateTime?
+  createdAt     DateTime @default(now())
+  expiresAt     DateTime?
+  refreshToken  String?
+
+  assignments SessionAssignment[]
+}
+
+model SessionAssignment {
+  id            String   @id @default(cuid())
+  poolAccountId String
+  assignedTo   String
+  assignedAt   DateTime @default(now())
+  releasedAt   DateTime?
+
+  poolAccount PoolAccount @relation(fields: [poolAccountId], references: [id], onDelete: Cascade)
+}
+
+model RateLimit {
+  id        String   @id @default(cuid())
+  key       String
+  count     Int      @default(0)
+  windowAt  DateTime @default(now())
+  updatedAt DateTime @updatedAt
+}

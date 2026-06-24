@@ -1,0 +1,11 @@
+services:
+  - type: web
+    name: tampkmail-bridge
+    env: docker
+    dockerfilePath: ./mini-services/tampkmail-bridge/Dockerfile
+    plan: free
+    region: oregon
+    healthCheckPath: /health
+    envVars:
+      - key: PORT
+        value: "3000"
