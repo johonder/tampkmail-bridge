@@ -158,6 +158,35 @@ export const useEmailStore = create<EmailState>((set, get) => ({
     set({ isCreating: true, error: null, messages: [], selectedMessage: null, selectedMessageFull: null, unreadCount: 0 });
 
     try {
+      const domainInfo = state.domains.find((d) => d.domain === domainToUse);
+      const isEdu = domainInfo?.type === "edu";
+
+      // For edu domains, call Render bridge directly (worker doesn't handle them properly)
+      if (isEdu) {
+        const bridgeRes = await fetch("https://tampkmail-bridge-1.onrender.com/create-email", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ domain: domainToUse }),
+        });
+        const bridgeData = await bridgeRes.json();
+        if (!bridgeData.success) {
+          set({ error: bridgeData.error || "Failed to create edu email", isCreating: false });
+          return;
+        }
+        const session: EmailSession = {
+          address: bridgeData.address,
+          domain: domainToUse,
+          domainType: "edu",
+          payload: "",
+          timestamp: Math.floor(Date.now() / 1000),
+          createdAt: new Date().toISOString(),
+        };
+        set({ session, isCreating: false });
+        saveSession(session);
+        get().startPolling();
+        return;
+      }
+
       const res = await api("/api/v1/create", {
         method: "POST",
         body: JSON.stringify({ domain: domainToUse, apikey: getApiKey() || undefined }),
@@ -199,6 +228,23 @@ export const useEmailStore = create<EmailState>((set, get) => ({
 
     set({ isFetchingMessages: true });
     try {
+      // For edu sessions, check inbox via bridge directly
+      if (session.domainType === "edu") {
+        const bridgeRes = await fetch("https://tampkmail-bridge-1.onrender.com/check-inbox", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ address: session.address }),
+        });
+        const bridgeData = await bridgeRes.json();
+        const messages: MailMessage[] = (bridgeData.messages || []).map((m: MailMessage) => ({
+          ...m,
+          mid: m.id || m.mid,
+        }));
+        const unreadCount = messages.filter((m) => !m.seen).length;
+        set({ messages, unreadCount, totalMessages: bridgeData.count || messages.length, isFetchingMessages: false });
+        return;
+      }
+
       const apikey = getApiKey();
       const body: Record<string, unknown> = {
         domain: session.domain,
