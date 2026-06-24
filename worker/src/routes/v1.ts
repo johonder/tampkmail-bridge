@@ -19,6 +19,7 @@ const DOMAINS = [
   { domain: "outlook.co.th", type: "microsoft", label: "Outlook" },
   { domain: "outlook.com.ar", type: "microsoft", label: "Outlook" },
   { domain: "outlook.co.il", type: "microsoft", label: "Outlook" },
+  { domain: "nullsto.edu.pl", type: "edu", label: "Edu" },
   { domain: "melbourne.edu.pl", type: "edu", label: "Edu" },
   { domain: "sydney.edu.pl", type: "edu", label: "Edu" },
   { domain: "tokyo.edu.pl", type: "edu", label: "Edu" },
@@ -94,6 +95,12 @@ v1Routes.post("/create", async (c) => {
       const now = new Date();
       const expiresAt = new Date(now.getTime() + 86400000);
 
+      const metadata: Record<string, unknown> = {};
+      if (bridgeData.secret && bridgeData.id) {
+        metadata.nullstoId = bridgeData.id;
+        metadata.nullstoSecret = bridgeData.secret;
+      }
+
       const { data, error } = await supabaseQuery("POST", "EmailSession", {
         id: crypto.randomUUID(),
         address: bridgeData.address,
@@ -103,10 +110,7 @@ v1Routes.post("/create", async (c) => {
         createdAt: now.toISOString(),
         expiredAt: expiresAt.toISOString(),
         keepaliveAt: now.toISOString(),
-        metadata: JSON.stringify({
-          smailproKey: bridgeData.key,
-          smailproTs: bridgeData.timestamp,
-        }),
+        metadata: JSON.stringify(metadata),
       });
 
       if (error || !data?.[0]) {
@@ -194,11 +198,88 @@ v1Routes.post("/inbox", async (c) => {
       let meta: Record<string, unknown> = {};
       try { meta = JSON.parse(session.metadata || "{}"); } catch {}
 
+      const nullstoId = meta.nullstoId as string;
+      const nullstoSecret = meta.nullstoSecret as string;
+
+      // If Nullsto metadata exists, use bridge check
+      if (nullstoId && nullstoSecret) {
+        const bridgeUrl = getBridgeUrl(c);
+        const inboxResp = await fetch(`${bridgeUrl}/check-inbox`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            address: session.address,
+            id: nullstoId,
+            secret: nullstoSecret,
+          }),
+        });
+
+        if (!inboxResp.ok) {
+          return c.json({ error: "Nullsto inbox unavailable" }, 502);
+        }
+
+        const inboxData = await inboxResp.json() as { messages?: Array<Record<string, unknown>> };
+        const bridgeMessages = inboxData.messages || [];
+
+        // Save messages to DB
+        for (const msg of bridgeMessages) {
+          const mid = (msg.mid as string) || (msg.id as string) || crypto.randomUUID();
+          const existingPath = buildQuery("EmailMessage", { mid: `eq.${mid}`, select: "id" });
+          const { data: existing } = await supabaseQuery("GET", existingPath);
+          if (Array.isArray(existing) && existing.length > 0) continue;
+
+          await supabaseQuery("POST", "EmailMessage", {
+            id: crypto.randomUUID(),
+            sessionId,
+            mid,
+            fromAddress: (msg.from as string) || (msg.fromAddress as string) || "",
+            fromName: (msg.fromName as string) || "",
+            subject: (msg.subject as string) || "(No Subject)",
+            intro: (msg.intro as string) || "",
+            body: (msg.body as string) || "",
+            bodyHtml: (msg.html as string) || "",
+            seen: false,
+            starred: false,
+            hasAttachments: false,
+            receivedAt: new Date().toISOString(),
+          });
+        }
+
+        const dbPath = buildQuery("EmailMessage", { sessionId: `eq.${sessionId}`, order: "receivedAt.desc", limit: "50" });
+        const { data: dbMessages } = await supabaseQuery("GET", dbPath);
+
+        return c.json({
+          messages: (Array.isArray(dbMessages) ? dbMessages : []).map(m => {
+            const fromName = m.fromName || (m.fromAddress ? m.fromAddress.split("@")[0]
+              ?.replace(/[._-]/g, " ")
+              .replace(/\b\w/g, (c: string) => c.toUpperCase()) : "") || "Unknown";
+            return {
+              id: m.mid,
+              mid: m.mid,
+              from: { address: m.fromAddress, name: fromName },
+              to: [{ address: "", name: "" }],
+              subject: m.subject || "(No Subject)",
+              intro: m.intro || "",
+              seen: m.seen,
+              isDeleted: false,
+              hasAttachments: m.hasAttachments,
+              size: 0,
+              downloadUrl: null,
+              createdAt: m.receivedAt || m.createdAt,
+            };
+          }),
+          count: Array.isArray(dbMessages) ? dbMessages.length : 0,
+          address: session.address,
+          key: sessionId,
+        });
+      }
+
+      // Legacy smailpro flow for other edu domains
       const smailproKey = meta.smailproKey as string;
       const smailproTs = meta.smailproTs as number;
 
       if (!smailproKey || !smailproTs) {
-        return c.json({ error: "No bridge session data" }, 400);
+        return c.json({ messages: [], count: 0, address: session.address, key: sessionId });
       }
 
       const inboxBody = [{ address: session.address, timestamp: smailproTs, key: smailproKey }];
