@@ -9,6 +9,9 @@ const IS_HEADLESS = !process.env.DISPLAY && !process.env.XVFB_RUNNING;
 let browser = null;
 let context = null;
 let browserError = null;
+let sessionReady = false;
+
+const DOMAINS = ["melbourne.edu.pl", "sydney.edu.pl", "tokyo.edu.pl"];
 
 async function getContext() {
   if (context && !context.pages().every((p) => p.isClosed())) return context;
@@ -18,6 +21,22 @@ async function getContext() {
       "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/125.0.0.0 Safari/537.36",
     locale: "en-US",
     viewport: { width: 1280, height: 800 },
+    extraHTTPHeaders: {
+      "sec-ch-ua": '"Google Chrome";v="125", "Chromium";v="125", "Not.A/Brand";v="24"',
+      "sec-ch-ua-mobile": "?0",
+      "sec-ch-ua-platform": '"Windows"',
+    },
+  });
+  await context.addInitScript(() => {
+    Object.defineProperty(navigator, "webdriver", { get: () => false });
+    if (!window.chrome) window.chrome = {};
+    window.chrome.runtime = { id: "fake" };
+    const gp = WebGLRenderingContext.prototype.getParameter;
+    WebGLRenderingContext.prototype.getParameter = function (p) {
+      if (p === 37445) return "Intel Inc.";
+      if (p === 37446) return "Intel Iris OpenGL Engine";
+      return gp.call(this, p);
+    };
   });
   return context;
 }
@@ -31,30 +50,73 @@ async function getBrowser() {
         "--no-sandbox",
         "--disable-setuid-sandbox",
         "--disable-dev-shm-usage",
+        "--disable-blink-features=AutomationControlled",
         ...(IS_HEADLESS ? ["--disable-gpu"] : []),
       ],
     });
     browserError = null;
-    console.log("Browser launched (headless:", IS_HEADLESS, ")");
   } catch (err) {
     browserError = err.message;
-    console.error("Browser launch failed:", err.message);
     throw err;
   }
   return browser;
 }
 
-const DOMAINS = ["melbourne.edu.pl", "sydney.edu.pl", "tokyo.edu.pl"];
+let sessionInitPromise = null;
+
+async function ensureSession() {
+  if (sessionReady) return;
+  if (sessionInitPromise) return sessionInitPromise;
+  
+  sessionInitPromise = (async () => {
+    for (let attempt = 0; attempt < 5; attempt++) {
+      try {
+        const ctx = await getContext();
+        const page = await ctx.newPage();
+        try {
+          await page.goto("https://smailpro.com/temporary-email", {
+            waitUntil: "domcontentloaded",
+            timeout: 30000,
+          });
+          await page.waitForTimeout(3000);
+          sessionReady = true;
+          console.log("Session initialized successfully");
+          return;
+        } finally {
+          await page.close().catch(() => {});
+        }
+      } catch (err) {
+        console.log(`Session init attempt ${attempt + 1} failed:`, err.message);
+        await new Promise((r) => setTimeout(r, 2000));
+      }
+    }
+    throw new Error("Failed to initialize session after 5 attempts");
+  })();
+  
+  return sessionInitPromise;
+}
+
+function generateAddress(domain) {
+  const rand = Math.random().toString(36).substring(2, 10);
+  const timestamp = Date.now().toString(36).substring(-4);
+  return `${rand}${timestamp}@${domain}`;
+}
 
 app.get("/", (req, res) => {
   res.json({
-    name: "Tampkmail Bridge",
-    version: "1.0.0",
+    name: "Tampkmail Bridge v2",
+    version: "2.0.0",
     status: browser ? (browser.isConnected() ? "ready" : "disconnected") : "starting",
     browserError,
     headless: IS_HEADLESS,
-    display: process.env.DISPLAY || "none",
-    endpoints: ["GET /health", "GET /", "POST /create-email", "POST /get-message"],
+    sessionReady,
+    endpoints: [
+      "GET /",
+      "GET /health",
+      "POST /create-email",
+      "POST /check-inbox",
+      "POST /get-message",
+    ],
   });
 });
 
@@ -67,95 +129,184 @@ app.post("/create-email", async (req, res) => {
     });
   }
 
-  const ctx = await getContext();
-  const page = await ctx.newPage();
+  try {
+    await ensureSession();
+    const address = generateAddress(domain);
+
+    // Verify the address works by checking inbox
+    const ctx = await getContext();
+    const page = await ctx.newPage();
+    try {
+      const checkResult = await page.evaluate(async (addr) => {
+        const r = await fetch("https://smailpro.com/app/inbox", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify([
+            {
+              address: addr,
+              timestamp: Math.floor(Date.now() / 1000),
+              key: "init-" + Math.random().toString(36),
+            },
+          ]),
+        });
+        return { status: r.status, body: (await r.text()).substring(0, 100) };
+      }, address);
+
+      if (checkResult.status !== 200) {
+        throw new Error("Inbox check failed: " + checkResult.body);
+      }
+
+      await page.close();
+      return res.json({
+        success: true,
+        address,
+        domain,
+        message:
+          "Email generated locally. Inbox polling will use active session.",
+      });
+    } catch (err) {
+      await page.close().catch(() => {});
+      throw err;
+    }
+  } catch (err) {
+    return res.status(500).json({ success: false, error: err.message });
+  }
+});
+
+app.post("/check-inbox", async (req, res) => {
+  const { address, domain } = req.body;
+  if (!address || !domain) {
+    return res
+      .status(400)
+      .json({ success: false, error: "address and domain required" });
+  }
 
   try {
-    const respPromise = page.waitForResponse(
-      (r) => r.url().includes("/app/create") && r.status() === 200,
-      { timeout: 60000 }
-    );
+    await ensureSession();
+    const ctx = await getContext();
+    const page = await ctx.newPage();
+    try {
+      const result = await page.evaluate(async (addr) => {
+        const r = await fetch("https://smailpro.com/app/inbox", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify([
+            {
+              address: addr,
+              timestamp: Math.floor(Date.now() / 1000),
+              key: "check-" + Math.random().toString(36),
+            },
+          ]),
+        });
+        if (!r.ok) return { status: r.status, body: (await r.text()).substring(0, 200) };
+        const data = await r.json();
+        return { status: r.status, data };
+      }, address);
 
-    await page.goto("https://smailpro.com/temporary-email", {
-      waitUntil: "networkidle",
-      timeout: 30000,
-    });
-
-    await page.waitForTimeout(2000);
-
-    const otherBtn = page.locator("button").filter({ hasText: "Other" });
-    if (await otherBtn.count() > 0) {
-      await otherBtn.click();
-      await page.waitForTimeout(500);
-    }
-
-    if (domain !== "melbourne.edu.pl") {
-      const selects = page.locator("select");
-      const count = await selects.count();
-      if (count > 0) {
-        await selects.first().selectOption(domain);
-        await page.waitForTimeout(300);
+      if (result.status !== 200) {
+        throw new Error("Inbox check failed: " + JSON.stringify(result));
       }
+
+      const inboxData = result.data[0];
+      const messages = [];
+
+      if (inboxData && inboxData.payload) {
+        // Decode payload via sonjj API
+        const type = domain && domain.includes("gmail") ? "temp_gmail"
+          : domain && domain.includes("outlook") ? "temp_outlook"
+          : "temp_email";
+        
+        const payloadResp = await page.evaluate(async (payload, type) => {
+          const r = await fetch(
+            `https://api.sonjj.com/v1/${type}/message?payload=${encodeURIComponent(payload)}`
+          );
+          if (!r.ok) return { error: (await r.text()).substring(0, 200) };
+          return await r.json();
+        }, inboxData.payload, type);
+
+        if (payloadResp.messages) {
+          for (const msg of payloadResp.messages) {
+            messages.push({
+              mid: msg.mid,
+              from: msg.from,
+              subject: msg.subject,
+              body: msg.body,
+              html: msg.html,
+              attachments: msg.attachments,
+              date: msg.date,
+              timestamp: msg.timestamp,
+            });
+          }
+        }
+      }
+
+      await page.close();
+      return res.json({
+        success: true,
+        address,
+        hasPayload: !!inboxData?.payload,
+        messages,
+        key: inboxData?.key || null,
+      });
+    } catch (err) {
+      await page.close().catch(() => {});
+      throw err;
     }
-
-    const generateBtn = page.locator("button").filter({ hasText: "Generate" });
-    await generateBtn.waitFor({ state: "visible", timeout: 10000 });
-    await generateBtn.click();
-
-    const resp = await respPromise;
-    const data = await resp.json();
-
-    await page.close();
-    return res.json({
-      success: true,
-      address: data.address,
-      timestamp: data.timestamp,
-      key: data.key,
-    });
   } catch (err) {
-    await page.close().catch(() => {});
     return res.status(500).json({ success: false, error: err.message });
   }
 });
 
 app.post("/get-message", async (req, res) => {
-  const { address, mid, domain } = req.body;
-  if (!address || !mid) {
-    return res.status(400).json({ success: false, error: "address and mid required" });
+  const { payload, domain } = req.body;
+  if (!payload) {
+    return res
+      .status(400)
+      .json({ success: false, error: "payload required" });
   }
 
-  const ctx = await getContext();
-  const page = await ctx.newPage();
-
   try {
-    const respPromise = page.waitForResponse(
-      (r) => r.url().includes("temp_email/message") && r.status() === 200,
-      { timeout: 60000 }
-    );
+    const type =
+      domain && (domain.includes("gmail") || domain.includes("googlemail"))
+        ? "temp_gmail"
+        : domain && (domain.includes("outlook") || domain.includes("hotmail"))
+          ? "temp_outlook"
+          : "temp_email";
 
-    const msgUrl = `https://smailpro.com/app/message?email=${encodeURIComponent(address)}&mid=${encodeURIComponent(mid)}`;
-    const msgResp = await page.goto(msgUrl, { waitUntil: "networkidle", timeout: 30000 });
-    const payload = await page.evaluate(() => document.body.innerText);
+    const ctx = await getContext();
+    const page = await ctx.newPage();
+    try {
+      const result = await page.evaluate(async (p, t) => {
+        const r = await fetch(
+          `https://api.sonjj.com/v1/${t}/message?payload=${encodeURIComponent(p)}`
+        );
+        if (!r.ok) return { error: (await r.text()).substring(0, 200) };
+        return await r.json();
+      }, payload, type);
 
-    if (!payload || payload.includes("captcha") || payload.includes("error")) {
-      throw new Error("Failed to get message payload: " + payload);
+      await page.close();
+
+      if (result.error) {
+        return res.status(500).json({ success: false, error: result.error });
+      }
+
+      const messages = (result.messages || []).map((msg) => ({
+        mid: msg.mid,
+        from: msg.from,
+        subject: msg.subject,
+        body: msg.body,
+        html: msg.html,
+        attachments: msg.attachments,
+        date: msg.date,
+        timestamp: msg.timestamp,
+      }));
+
+      return res.json({ success: true, messages });
+    } catch (err) {
+      await page.close().catch(() => {});
+      throw err;
     }
-
-    const type = domain && (domain.includes("gmail") || domain.includes("googlemail"))
-      ? "temp_gmail"
-      : domain && (domain.includes("outlook") || domain.includes("hotmail"))
-        ? "temp_outlook"
-        : "temp_email";
-
-    const apiResp = await page.evaluate(async (p) => {
-      const r = await fetch(`https://api.sonjj.com/v1/temp_email/message?payload=${encodeURIComponent(p)}`);
-      return await r.json();
-    }, payload);
-
-    await page.close();
-    return res.json({ success: true, body: apiResp.body, attachments: apiResp.attachments });
   } catch (err) {
-    await page.close().catch(() => {});
     return res.status(500).json({ success: false, error: err.message });
   }
 });
@@ -163,18 +314,31 @@ app.post("/get-message", async (req, res) => {
 app.get("/health", (req, res) => {
   res.json({
     status: "ok",
-    browser: browser ? (browser.isConnected() ? "connected" : "disconnected") : "not_started",
+    browser: browser
+      ? browser.isConnected()
+        ? "connected"
+        : "disconnected"
+      : "not_started",
     browserError,
     headless: IS_HEADLESS,
+    sessionReady,
   });
 });
 
 const PORT = parseInt(process.env.PORT || "3000");
 app.listen(PORT, async () => {
-  console.log(`Bridge running on port ${PORT}`);
+  console.log(`Bridge v2 running on port ${PORT}`);
+  // Wait for browser to fully launch
   try {
     await getBrowser();
-    console.log("Browser launched");
+    console.log("Browser launched (headless:", IS_HEADLESS, ")");
+    // Now initialize session
+    try {
+      await ensureSession();
+      console.log("Session ready");
+    } catch (e) {
+      console.error("Session init failed:", e.message);
+    }
   } catch (err) {
     console.error("Failed to launch browser:", err);
   }
