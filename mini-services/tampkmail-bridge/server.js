@@ -94,17 +94,13 @@ app.get("/", (req, res) => {
 });
 
 app.get("/health", (req, res) => {
-  res.json({ status: "ok", accounts: ACCOUNTS.size, nullsto_available: existsSync(NULLSTO_BRIDGE) });
+  res.json({ status: "ok", accounts: ACCOUNTS.size });
 });
 
 app.post("/create-email", async (req, res) => {
   const { domain } = req.body || {};
-  const isEdu = domain && EDU_DOMAINS.includes(domain);
-  const actualDomain = domain && MAILTM_DOMAINS.includes(domain)
-    ? domain
-    : (isEdu ? "nullsto.edu.pl" : MAILTM_DOMAINS[0]);
-
-  // mail.tm path (used for all domains including edu)
+  // Use a real mail.tm domain for account creation (edu/nullsto domains aren't on mail.tm)
+  const actualDomain = MAILTM_DOMAINS.includes(domain) ? domain : MAILTM_DOMAINS[0];
   const address = `${randStr(12)}@${actualDomain}`;
   const password = randStr(20);
   const ac = await fetchMailTM("/accounts", {
@@ -112,14 +108,14 @@ app.post("/create-email", async (req, res) => {
     body: JSON.stringify({ address, password }),
   });
   if (!ac.ok) {
-    return res.status(500).json({ success: false, error: String(ac.data).slice(0, 200) });
+    return res.status(500).json({ success: false, error: typeof ac.data === "string" ? ac.data.slice(0, 200) : JSON.stringify(ac.data).slice(0, 200) });
   }
   const tk = await fetchMailTM("/token", {
     method: "POST",
     body: JSON.stringify({ address, password }),
   });
   if (!tk.ok) {
-    return res.status(500).json({ success: false, error: String(tk.data).slice(0, 200) });
+    return res.status(500).json({ success: false, error: typeof tk.data === "string" ? tk.data.slice(0, 200) : JSON.stringify(tk.data).slice(0, 200) });
   }
   ACCOUNTS.set(address, { password, token: tk.data.token, backend: "mailtm" });
   return res.json({
