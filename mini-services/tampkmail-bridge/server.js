@@ -115,7 +115,6 @@ app.get("/", (req, res) => {
       "GET /health",
       "POST /create-email",
       "POST /check-inbox",
-      "POST /get-message",
     ],
   });
 });
@@ -248,60 +247,6 @@ app.post("/check-inbox", async (req, res) => {
         messages,
         key: inboxData?.key || null,
       });
-    } catch (err) {
-      await page.close().catch(() => {});
-      throw err;
-    }
-  } catch (err) {
-    return res.status(500).json({ success: false, error: err.message });
-  }
-});
-
-app.post("/get-message", async (req, res) => {
-  const { payload, domain } = req.body;
-  if (!payload) {
-    return res
-      .status(400)
-      .json({ success: false, error: "payload required" });
-  }
-
-  try {
-    const type =
-      domain && (domain.includes("gmail") || domain.includes("googlemail"))
-        ? "temp_gmail"
-        : domain && (domain.includes("outlook") || domain.includes("hotmail"))
-          ? "temp_outlook"
-          : "temp_email";
-
-    const ctx = await getContext();
-    const page = await ctx.newPage();
-    try {
-      const result = await page.evaluate(async ({ p, t }) => {
-        const r = await fetch(
-          `https://api.sonjj.com/v1/${t}/message?payload=${encodeURIComponent(p)}`
-        );
-        if (!r.ok) return { error: (await r.text()).substring(0, 200) };
-        return await r.json();
-      }, { p: payload, t: type });
-
-      await page.close();
-
-      if (result.error) {
-        return res.status(500).json({ success: false, error: result.error });
-      }
-
-      const messages = (result.messages || []).map((msg) => ({
-        mid: msg.mid,
-        from: msg.from,
-        subject: msg.subject,
-        body: msg.body,
-        html: msg.html,
-        attachments: msg.attachments,
-        date: msg.date,
-        timestamp: msg.timestamp,
-      }));
-
-      return res.json({ success: true, messages });
     } catch (err) {
       await page.close().catch(() => {});
       throw err;
