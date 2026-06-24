@@ -216,13 +216,13 @@ app.post("/check-inbox", async (req, res) => {
           : domain && domain.includes("outlook") ? "temp_outlook"
           : "temp_email";
         
-        const payloadResp = await page.evaluate(async (payload, type) => {
+        const payloadResp = await page.evaluate(async ({ p, t }) => {
           const r = await fetch(
-            `https://api.sonjj.com/v1/${type}/message?payload=${encodeURIComponent(payload)}`
+            `https://api.sonjj.com/v1/${t}/message?payload=${encodeURIComponent(p)}`
           );
           if (!r.ok) return { error: (await r.text()).substring(0, 200) };
           return await r.json();
-        }, inboxData.payload, type);
+        }, { p: inboxData.payload, t: type });
 
         if (payloadResp.messages) {
           for (const msg of payloadResp.messages) {
@@ -276,13 +276,13 @@ app.post("/get-message", async (req, res) => {
     const ctx = await getContext();
     const page = await ctx.newPage();
     try {
-      const result = await page.evaluate(async (p, t) => {
+      const result = await page.evaluate(async ({ p, t }) => {
         const r = await fetch(
           `https://api.sonjj.com/v1/${t}/message?payload=${encodeURIComponent(p)}`
         );
         if (!r.ok) return { error: (await r.text()).substring(0, 200) };
         return await r.json();
-      }, payload, type);
+      }, { p: payload, t: type });
 
       await page.close();
 
